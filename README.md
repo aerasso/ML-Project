@@ -1,0 +1,2 @@
+# ML-Project
+This machine learning project aims to predict the quality of a specific type of gym exercise based on measurements of acceleration of six individuals. It uses data from accelerometers on the belt, forearm, arm, and dumbell of six participants performing barbell lifts correctly and incorrectly in five different ways. More information is available at: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
