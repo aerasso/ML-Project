@@ -1,0 +1,172 @@
+# Coursera - Practical Machine Learning - Project Write-Up
+*Alex Erasso*
+*Sunday, October 25, 2015*
+
+## Summary
+
+This machine learning project aims to predict the quality of a specific type of gym exercise based on measurements of acceleration of six individuals. It uses data from accelerometers on the belt, forearm, arm, and dumbell of six participants performing barbell lifts correctly and incorrectly in five different ways. More information is available at: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+Below we present the steps we have followed to develop a classifier for the quality of the exercise. This is the "classe" variable in the training set of about 20,000 readings of 160 variables. We have used cross-validation by splitting the training set and using 30% of its records for model validation. Results after pre-processing the training set, finding its principal components, and training a random forest algorithm indicated accuracy of 97% (or out of sample error expected at about 3%).  
+
+A final test of the classifier, using 20 records provided by Coursera, was executed with 100% accuracy.
+
+## Pre Processing Phase
+
+Reading files with training and testing data sets
+
+```{r} 
+workdir<-getwd()
+
+fpath1 = file.path(workdir, "pml-training.csv")
+if (!file.exists(fpath1)){
+    fileUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+    download.file(fileUrl, "./pml-training.csv")
+} 
+training <- read.csv("pml-training.csv", header=TRUE, sep=",")
+
+fpath2 = file.path(workdir, "pml-testing.csv")
+if (!file.exists(fpath2)){
+    fileUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+    download.file(fileUrl, "./pml-testing.csv")
+} 
+testing <- read.csv("pml-testing.csv", header=TRUE, sep=",")
+
+library(caret)
+set.seed(3433)
+
+```
+
+Removing columns with NAs or "" in the samples
+
+``` {r}
+noNATrain <- sapply(training, function(x) any(is.na(x) || x=="" ))
+
+training1.3 <- training[ ,!(noNATrain)]
+testing1.3  <- testing[ ,!noNATrain]
+```
+
+Removing predictors that have constant values. The data set must be a numeric vector or matrix, or a data frame with all numeric data.
+
+```{r}
+nzv <- nearZeroVar(training1.3, saveMetrics=TRUE)
+nzv
+nzv <- nearZeroVar(training1.3, saveMetrics=FALSE)
+nzv
+training2 <-training1.3[,-nzv]
+testing2  <-testing1.3[,-nzv]
+```
+
+Splitting the training set into a training and a cross-validation subsets
+
+```{r}
+inTrain <- createDataPartition(y=training2$classe, p =0.7, list=FALSE)
+trainSet <- training2[inTrain, ]
+crossVal <- training2[-inTrain, ]
+```
+
+Finding principal components for the training subset to reduce the number of predictors. Notice that predictors with large number of NA were excluded since they would obtain variance. Also individuals' names and outcome were excluded.
+
+```{r}
+preProc <- preProcess(trainSet[ , 2:58], method=c("center", "scale", "pca"), thresh = 0.80)
+preProc
+preProc$std
+preProc$thresh
+preProc$numComp
+```
+
+Reduced training set with fewer predictors using principal components
+
+```{r}
+trainPC <- predict(preProc, trainSet[ , 2:58])  
+crossPC <- predict(preProc, crossVal[ , 2:58])  
+```
+
+Exploration of reduced list of predictors
+
+```{r}
+featurePlot(x = trainPC[,3:15],
+            y = trainSet$classe,
+            plot = "density",
+            main = "Density Plots of Predictors for Classe Outcome",
+            auto.key = list(columns = 5))
+
+featurePlot(x = trainPC[,3:15],
+            y = trainSet$classe,
+            plot = "box",
+            main = "Boxplots of Predictors for Classe Outcome",
+            ## Add a key at the top
+            auto.key = list(columns = 5))
+```
+
+## Training Phase
+
+Parallel computing to accelerate calculations
+
+```{r}
+require(parallel)
+require(doParallel)
+cl <- makeCluster(detectCores()- 1)
+registerDoParallel(cl)
+```
+
+Seting the control parameters and fitting the model
+
+```{r , cache=TRUE}
+controlParam <- trainControl(classProbs=TRUE,savePredictions=TRUE,allowParallel=TRUE, search = "random")
+trainingModel <- train(trainSet$classe ~ ., data=trainPC, method="rf")
+trainingModel
+
+varImpTrain <- varImp(trainingModel)
+plot(varImpTrain, top = 10, main="Importance of Predictors for Classe Outcome")
+```
+
+Exploration of relationships among the principal components with importance over 70/100
+
+```{r, cache=TRUE}
+pcover70 <-c(FALSE,FALSE,FALSE,FALSE,TRUE,FALSE,TRUE,FALSE,FALSE,TRUE,TRUE,FALSE,FALSE,FALSE,TRUE)
+featurePlot(x = trainPC[,pcover70],
+            y = trainSet$classe,
+            plot = "pairs",
+            main = "Pair Plots of Predictors for Classe Outcome",
+            auto.key = list(columns = 5))
+```
+
+## Model Evaluation
+
+Model assessment on training data set
+
+```{r}
+est1 <- predict(trainingModel, trainPC)
+confusionMatrix(est1, trainSet$classe)
+```
+
+Model assessment of cross-validation set 
+
+```{r}
+est2 <-predict(trainingModel, crossPC)
+confusionMatrix(est2, crossVal$classe)
+```
+
+## Preparing the Testing Data Set and the Submission Files
+
+```{r}
+testPC <- predict(preProc, testing2[ , 2:58]) 
+predictions <-predict(trainingModel, testPC)
+predictions2 <- as.array(predictions)
+
+pml_write_files = function(x){
+    n = length(x)
+    for(i in 1:n){
+        filename = paste0("problem_id_",i,".txt")
+        write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+}
+
+pml_write_files(predictions2)
+```
+
+Stopping the cluster for parallel computing
+
+```{r}
+stopCluster(cl)
+```
